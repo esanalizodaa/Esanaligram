@@ -1,0 +1,14 @@
+{
+	"bundle_id": "ph.telegra.Telegraph",
+	"api_id": "37677652",
+	"api_hash": "4ba6b895b6817157967766b36ab4c2c0",
+	"team_id": "C67CF9S4VU",
+	"app_center_id": "0",
+	"is_internal_build": "true",
+	"is_appstore_build": "false",
+	"appstore_id": "0",
+	"app_specific_url_scheme": "esnaligram",
+	"premium_iap_product_id": "",
+	"enable_siri": false,
+	"enable_icloud": false
+}

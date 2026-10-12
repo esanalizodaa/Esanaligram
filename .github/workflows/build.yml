@@ -1,0 +1,60 @@
+name: Build Esnaligram IPA (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode seç (versions.json ile aynı olmalı)
+        run: |
+          ls /Applications | grep -i xcode || true
+          XC=$(ls -d /Applications/Xcode_26.6*.app 2>/dev/null | head -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1); echo "UYARI: Xcode 26.6 yok, $XC kullanılıyor"; fi
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Telegram-iOS kaynağını al
+        run: |
+          source UPSTREAM
+          git clone --recursive --depth 1 --branch "$tag" "$repo" telegram-ios
+          cd telegram-ios && test "$(git rev-parse HEAD)" = "$commit"
+
+      - name: Esnaligram yamalarını uygula
+        env:
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+        run: python3 scripts/apply.py telegram-ios
+
+      - name: Bazel cache
+        uses: actions/cache@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ runner.os }}-${{ hashFiles('UPSTREAM') }}-${{ github.sha }}
+          restore-keys: bazel-${{ runner.os }}-${{ hashFiles('UPSTREAM') }}-
+
+      - name: Derle (fake codesigning = imzasız IPA)
+        working-directory: telegram-ios
+        run: |
+          python3 build-system/Make/Make.py --cacheDir="$HOME/telegram-bazel-cache" \
+            --overrideXcodeVersion build \
+            --configurationPath=../config/esnaligram-configuration.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --buildNumber=${{ github.run_number }} --configuration=release_arm64
+
+      - name: IPA topla
+        run: |
+          IPA=$(find telegram-ios/bazel-bin/Telegram -name "*.ipa" | head -1)
+          test -n "$IPA"
+          cp "$IPA" Esnaligram.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Esnaligram-ipa-${{ github.run_number }}
+          path: Esnaligram.ipa
+          retention-days: 30

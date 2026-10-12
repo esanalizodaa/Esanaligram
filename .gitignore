@@ -1,0 +1,4 @@
+config/local.env
+telegram-ios/
+*.ipa
+.DS_Store
