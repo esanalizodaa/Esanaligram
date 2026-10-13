@@ -492,3 +492,46 @@ edit("submodules/TelegramUI/Sources/ChatControllerNode.swift",
 edit("submodules/SettingsUI/Sources/Language Selection/LocalizationListControllerNode.swift",
 "            let isPremium = peer?.isPremium ?? false\n",
 "            let isPremium = (peer?.isPremium ?? false) || true // Esnaligram\n")
+
+# --- Hikâye: iki satır büyük tepki düğmesi (yanıt alanının üstünde) ---
+edit(SSC, "        weak var standaloneReactionAnimation: StandaloneReactionAnimation?\n",
+"""        weak var standaloneReactionAnimation: StandaloneReactionAnimation?
+        var esnReactionStrip: EsnaligramStoryReactionStrip?
+""")
+edit(SSC, "                    transition.setAlpha(view: inputPanelView, alpha: inputPanelAlpha)\n                }\n",
+"""                    transition.setAlpha(view: inputPanelView, alpha: inputPanelAlpha)
+                }
+                var esnShowStrip = inputPanelAlpha > 0.01 && !self.inputPanelExternalState.isEditing && !component.slice.effectivePeer.isService
+                if case .liveStream = component.slice.item.storyItem.media { esnShowStrip = false }
+                var esnEmojis: [String] = []
+                if let reactionItems = component.availableReactions?.reactionItems {
+                    for item in reactionItems {
+                        if case let .builtin(value) = item.reaction.rawValue, !esnEmojis.contains(value) {
+                            esnEmojis.append(value)
+                        }
+                    }
+                }
+                if esnEmojis.isEmpty { esnEmojis = ["❤", "👍", "🔥", "😂", "😍", "👏", "😢", "😮", "🎉", "🙏"] }
+                let esnStrip: EsnaligramStoryReactionStrip
+                if let current = self.esnReactionStrip {
+                    esnStrip = current
+                } else {
+                    esnStrip = EsnaligramStoryReactionStrip(frame: .zero)
+                    self.esnReactionStrip = esnStrip
+                    self.componentContainerView.addSubview(esnStrip)
+                }
+                esnStrip.onSelect = { [weak self] emoji in
+                    guard let self, let component = self.component else { return }
+                    let reaction: MessageReaction.Reaction? = component.slice.item.storyItem.myReaction == .builtin(emoji) ? nil : .builtin(emoji)
+                    let _ = component.context.engine.messages.setStoryReaction(peerId: component.slice.effectivePeer.id, id: component.slice.item.id.id, reaction: reaction).startStandalone()
+                }
+                esnStrip.onMore = { [weak self] sourceView in
+                    self?.performLikeOptionsAction(sourceView: sourceView, gesture: nil)
+                }
+                var esnSelected: String?
+                if case let .builtin(value)? = component.slice.item.storyItem.myReaction { esnSelected = value }
+                esnStrip.update(emojis: esnEmojis, selected: esnSelected)
+                esnStrip.frame = CGRect(x: 0.0, y: inputPanelFrame.minY - EsnaligramStoryReactionStrip.totalHeight, width: availableSize.width, height: EsnaligramStoryReactionStrip.totalHeight)
+                esnStrip.alpha = esnShowStrip ? inputPanelAlpha : 0.0
+                esnStrip.isUserInteractionEnabled = esnShowStrip
+""")
