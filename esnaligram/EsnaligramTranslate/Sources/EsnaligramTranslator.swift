@@ -191,14 +191,35 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         EsnaligramTranslator.shared.extraPrompt = promptView.text ?? ""
         dismiss(animated: true)
     }
-    public func numberOfSections(in t: UITableView) -> Int { 2 }
-    public func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int { s == 0 ? 1 : EsnaligramTranslator.languages.count + 1 }
-    public func tableView(_ t: UITableView, titleForHeaderInSection s: Int) -> String? { s == 0 ? "Ek prompt (isteğe bağlı)" : "Hedef dil" }
-    public func tableView(_ t: UITableView, titleForFooterInSection s: Int) -> String? { s == 0 ? message : nil }
-    public func tableView(_ t: UITableView, heightForRowAt ip: IndexPath) -> CGFloat { ip.section == 0 ? 120 : 44 }
+    public func numberOfSections(in t: UITableView) -> Int { 3 }
+    public func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int {
+        if s == 0 { return 1 } // auto-translate toggle
+        if s == 1 { return 1 } // prompt
+        return EsnaligramTranslator.languages.count + 1
+    }
+    public func tableView(_ t: UITableView, titleForHeaderInSection s: Int) -> String? {
+        if s == 0 { return "Gelen mesajlar" }
+        if s == 1 { return "Ek prompt (isteğe bağlı)" }
+        return "Giden çeviri — hedef dil"
+    }
+    public func tableView(_ t: UITableView, titleForFooterInSection s: Int) -> String? {
+        if s == 0 { return "Açıkken gelen mesajlar uygulama diline çevrilir. Orijinal için çeviriye dokun." }
+        if s == 1 { return message }
+        return nil
+    }
+    public func tableView(_ t: UITableView, heightForRowAt ip: IndexPath) -> CGFloat { ip.section == 1 ? 120 : 44 }
     public func tableView(_ t: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
         let c = UITableViewCell(style: .default, reuseIdentifier: nil)
         if ip.section == 0 {
+            c.textLabel?.text = "Otomatik çevir (gelen)"
+            let sw = UISwitch()
+            if UserDefaults.standard.object(forKey: "esn.autoTranslate") == nil { sw.isOn = true }
+            else { sw.isOn = UserDefaults.standard.bool(forKey: "esn.autoTranslate") }
+            sw.addTarget(self, action: #selector(autoChanged(_:)), for: .valueChanged)
+            c.accessoryView = sw; c.selectionStyle = .none
+            return c
+        }
+        if ip.section == 1 {
             promptView.frame = c.contentView.bounds.insetBy(dx: 12, dy: 6)
             promptView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             c.contentView.addSubview(promptView); c.selectionStyle = .none
@@ -209,9 +230,12 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         c.accessoryType = EsnaligramTranslator.shared.manualTargetLanguage == code ? .checkmark : .none
         return c
     }
+    @objc private func autoChanged(_ sw: UISwitch) {
+        UserDefaults.standard.set(sw.isOn, forKey: "esn.autoTranslate")
+    }
     public func tableView(_ t: UITableView, didSelectRowAt ip: IndexPath) {
-        guard ip.section == 1 else { return }
+        guard ip.section == 2 else { return }
         EsnaligramTranslator.shared.manualTargetLanguage = ip.row == 0 ? nil : EsnaligramTranslator.languages[ip.row - 1].code
-        t.reloadSections(IndexSet(integer: 1), with: .none)
+        t.reloadSections(IndexSet(integer: 2), with: .none)
     }
 }

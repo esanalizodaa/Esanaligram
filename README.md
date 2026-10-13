@@ -15,6 +15,12 @@ Lisans: GPLv2/GPLv3 (Telegram-iOS ile aynı). Kaynak kodu açık kalmalıdır.
 - Uygulama adı: **Esnaligram**.
 - Android sürümündeki AFK / otomasyon özellikleri **yok** (bilinçli olarak taşınmadı).
 
+
+## Ek özellikler (bu sürüm)
+- **Gelen otomatik çeviri:** varsayılan açık; tüm sohbet türlerinde (özel, grup, kanal, bot, konu, gizli). DeepInfra + entity koruması (linkler tıklanabilir kalır). Çeviri butonuna uzun bas → aç/kapa.
+- **Hesap limiti yok:** en fazla 50 hesap; "Hesap Ekle" her zaman kullanılabilir.
+- **Hikâye Çevir:** hikâye görüntüleyicide kapat butonunun solunda. Cihazda OCR (Vision), DeepInfra ile uygulama diline çeviri, kapanabilir katman. Ekran görüntüsü almaz; içerik korumasını kaldırmaz.
+
 ## DeepInfra anahtarı
 Anahtar repoda **yok**. GitHub → Settings → Secrets and variables → Actions → **New repository secret**:
 `DEEPINFRA_API_KEY` = anahtarın. Derleme sırasında uygulamaya gömülür.
