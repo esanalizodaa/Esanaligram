@@ -18,15 +18,41 @@ public enum EsnaligramCoreKeyStore {
                   let s = String(data: d, encoding: .utf8), !s.isEmpty else { return nil }
             return s
         }
-        set {
-            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-            SecItemDelete(base as CFDictionary)
-            guard let v = newValue?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return }
-            var add = base
-            add[kSecValueData as String] = Data(v.utf8)
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(add as CFDictionary, nil)
+        set { _ = saveKey(newValue) }
+    }
+
+    /// Update-or-add; nil/boş = sil. Başarı için errSecSuccess döner.
+    @discardableResult
+    public static func saveKey(_ value: String?) -> OSStatus {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        guard let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else {
+            let st = SecItemDelete(base as CFDictionary)
+            return st == errSecItemNotFound ? errSecSuccess : st
         }
+        let attrs: [String: Any] = [kSecValueData as String: Data(v.utf8), kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        var st = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+        if st == errSecItemNotFound {
+            var add = base
+            for (k, a) in attrs { add[k] = a }
+            st = SecItemAdd(add as CFDictionary, nil)
+        }
+        return st
+    }
+
+    /// Anahtar + model + adres kaydı; geri okuyarak doğrular. nil = başarılı, aksi halde hata metni.
+    public static func saveAll(key: String?, model: String?, baseURL: String?) -> String? {
+        let m = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let u = baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        UserDefaults.standard.set(m.isEmpty ? nil : m, forKey: "esn.model")
+        UserDefaults.standard.set(u.isEmpty ? nil : u, forKey: "esn.baseURL")
+        UserDefaults.standard.synchronize()
+        if let k = key?.trimmingCharacters(in: .whitespacesAndNewlines), !k.isEmpty {
+            let st = saveKey(k)
+            if st != errSecSuccess { return "Anahtar Keychain'e yazılamadı (OSStatus \(st))." }
+            if userKey != k { return "Anahtar kaydedildi ama geri okunamadı." }
+        }
+        if (userModel ?? "") != m || (userBaseURL ?? "") != u { return "Model/adres kaydedilemedi." }
+        return nil
     }
     public static func effectiveKey(embedded: String) -> String? {
         if let k = userKey { return k }

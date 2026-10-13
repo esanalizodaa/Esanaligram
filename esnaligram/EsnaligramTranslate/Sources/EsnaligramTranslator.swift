@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import NaturalLanguage
+import Security
 
 public final class EsnaligramTranslator {
     public static let shared = EsnaligramTranslator()
@@ -343,17 +344,22 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
     }
     @objc private func saveKey() {
         let v = (keyField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        EsnaligramKeyStore.userModel = modelField.text
-        EsnaligramKeyStore.userBaseURL = urlField.text
-        if !v.isEmpty { EsnaligramKeyStore.userKey = v }
-        keyStatus = "Kaydedildi."
+        if let err = EsnaligramKeyStore.saveAll(key: v, model: modelField.text, baseURL: urlField.text) {
+            keyStatus = "❌ " + err
+        } else {
+            keyStatus = "✅ Kaydedildi."
+            keyField.text = EsnaligramKeyStore.userKey
+            modelField.text = EsnaligramKeyStore.userModel
+            urlField.text = EsnaligramKeyStore.userBaseURL
+        }
         keyField.resignFirstResponder()
         table.reloadSections(IndexSet(integer: 0), with: .none)
     }
     @objc private func clearKey() {
-        EsnaligramKeyStore.userKey = nil
+        let st = EsnaligramKeyStore.saveKey(nil)
         EsnaligramKeyStore.userModel = nil
         EsnaligramKeyStore.userBaseURL = nil
+        if st != errSecSuccess { keyStatus = "❌ Silinemedi (OSStatus \(st))."; table.reloadSections(IndexSet(integer: 0), with: .none); return }
         keyField.text = ""; modelField.text = ""; urlField.text = ""
         keyStatus = "Silindi."
         table.reloadSections(IndexSet(integer: 0), with: .none)
