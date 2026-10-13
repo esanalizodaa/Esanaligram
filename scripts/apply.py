@@ -246,7 +246,7 @@ edit(CT,
 HL = "submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
 edit(HL,
 "                if let translationState, (isPremium || autoTranslate)  && translationState.isEnabled {",
-"                if let translationState, translationState.isEnabled { // Esnaligram: Premium şartı yok")
+"                if let translationState, translationState.isEnabled, (isPremium || autoTranslate || true) { // Esnaligram: Premium şartı yok")
 
 # Translate.swift: replace functions cleanly
 TR = "submodules/TelegramCore/Sources/TelegramEngine/Messages/Translate.swift"
