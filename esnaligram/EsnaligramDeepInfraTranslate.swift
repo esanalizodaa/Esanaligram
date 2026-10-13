@@ -301,7 +301,7 @@ public enum EsnaligramDeepInfra {
     public static func contextString(_ lines: [String]) -> String {
         var out: [String] = []
         var total = 0
-        for l in lines.suffix(20).reversed() {
+        for l in lines.suffix(10).reversed() {
             let line = String(l.prefix(600)).replacingOccurrences(of: "\n", with: " ")
             if total + line.count > 3000 { break }
             total += line.count
@@ -337,25 +337,64 @@ public enum EsnaligramDeepInfra {
         return signal
     }
 
-    public static func translateSignal(text: String, entities: [MessageTextEntity], toLang: String, context: String = "") -> Signal<(String, [MessageTextEntity]), NoError> {
+    /// Google'ın bozduğu yer tutucuları (⟦ E0 ⟧ gibi) düzeltir.
+    static func normalizePlaceholders(_ text: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: "⟦\\s*[EeЕе]\\s*(\\d+)\\s*⟧") else { return text }
+        let ns = text as NSString
+        return re.stringByReplacingMatches(in: text, range: NSRange(location: 0, length: ns.length), withTemplate: "⟦E$1⟧")
+    }
+
+    /// Anahtarsız ücretsiz Google Translate. Hata / 429 durumunda nil.
+    static func googleRequest(_ text: String, toLang: String, completion: @escaping (String?, String?) -> Void) -> URLSessionDataTask? {
+        var tl = toLang.lowercased()
+        if tl.hasSuffix("-raw") { tl = String(tl.dropLast(4)) }
+        if tl.hasPrefix("zh") {
+            tl = (tl.contains("hant") || tl.contains("tw") || tl.contains("hk")) ? "zh-TW" : "zh-CN"
+        } else if let dash = tl.firstIndex(of: "-") {
+            tl = String(tl[..<dash])
+        }
+        if tl == "he" { tl = "iw" }
+        if tl.isEmpty { tl = "en" }
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        guard let q = text.addingPercentEncoding(withAllowedCharacters: allowed) else { completion(nil, nil); return nil }
+        let base = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=\(tl)&dt=t"
+        var req: URLRequest
+        if q.count <= 6000, let url = URL(string: base + "&q=" + q) {
+            req = URLRequest(url: url)
+            req.httpMethod = "GET"
+        } else if let url = URL(string: base) {
+            req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/x-www-form-urlencoded;charset=utf-8", forHTTPHeaderField: "Content-Type")
+            req.httpBody = Data(("q=" + q).utf8)
+        } else {
+            completion(nil, nil); return nil
+        }
+        req.timeoutInterval = 15
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+        let task = URLSession.shared.dataTask(with: req) { data, resp, error in
+            guard error == nil, let data, (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
+                  let segments = json.first as? [Any] else {
+                completion(nil, nil); return
+            }
+            var out = ""
+            for seg in segments {
+                if let arr = seg as? [Any], let str = arr.first as? String { out += str }
+            }
+            let src: String? = json.count > 2 ? (json[2] as? String) : nil
+            completion(out.isEmpty ? nil : out, src)
+        }
+        task.resume()
+        return task
+    }
+
+    /// Yapay zekâ çevirisi. Başarısızsa nil.
+    static func aiSignal(text: String, entities: [MessageTextEntity], toLang: String, context: String) -> Signal<(String, [MessageTextEntity])?, NoError> {
         return Signal { subscriber in
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                subscriber.putNext((text, entities))
-                subscriber.putCompletion()
-                return EmptyDisposable
-            }
-            // Skip if already target language
-            if let detected = detectLanguage(trimmed) {
-                let normTo = toLang.lowercased().prefix(2)
-                if detected.lowercased().hasPrefix(String(normTo)) {
-                    subscriber.putNext((text, entities))
-                    subscriber.putCompletion()
-                    return EmptyDisposable
-                }
-            }
             guard let ep = EsnaligramCoreKeyStore.resolve(embeddedKey: apiKey, embeddedModel: model) else {
-                subscriber.putNext((text, entities))
+                subscriber.putNext(nil)
                 subscriber.putCompletion()
                 return EmptyDisposable
             }
@@ -363,23 +402,67 @@ public enum EsnaligramDeepInfra {
             let userContent: String = context.isEmpty ? protected : "RECENT CHAT MESSAGES (CONTEXT ONLY - DO NOT TRANSLATE, DO NOT OUTPUT):\n" + context + "\n\nMESSAGE TO TRANSLATE (output only its translation):\n" + protected
             let req = EsnaligramCoreKeyStore.makeRequest(ep, system: systemPrompt(toLang: toLang), user: userContent, temperature: 0.2, maxTokens: 2048, timeout: 45)
             let task = URLSession.shared.dataTask(with: req) { data, _, error in
-                if error != nil || data == nil {
-                    subscriber.putNext((text, entities))
-                    subscriber.putCompletion()
-                    return
+                if error == nil, let content = EsnaligramCoreKeyStore.parse(data), !content.isEmpty {
+                    let restored = restore(sanitizePunctuation(normalizePlaceholders(content)), tokens: tokens)
+                    subscriber.putNext((restored.0, restored.1))
+                } else {
+                    subscriber.putNext(nil)
                 }
-                var out = text
-                var outEnt = entities
-                if let content = EsnaligramCoreKeyStore.parse(data), !content.isEmpty {
-                    let restored = restore(sanitizePunctuation(content), tokens: tokens)
-                    out = restored.0
-                    outEnt = restored.1
-                }
-                subscriber.putNext((out, outEnt))
                 subscriber.putCompletion()
             }
             task.resume()
             return ActionDisposable { task.cancel() }
+        }
+    }
+
+    /// Ücretsiz Google çevirisi (bağlantılar korunur). Başarısızsa nil.
+    static func googleSignal(text: String, entities: [MessageTextEntity], toLang: String) -> Signal<(String, [MessageTextEntity])?, NoError> {
+        return Signal { subscriber in
+            let (protected, tokens) = protect(text, entities: entities)
+            let task = googleRequest(protected, toLang: toLang) { translated, _ in
+                guard let translated else {
+                    subscriber.putNext(nil)
+                    subscriber.putCompletion()
+                    return
+                }
+                let fixed = normalizePlaceholders(translated)
+                if tokens.contains(where: { !fixed.contains($0.placeholder) }) {
+                    // Bağlantı kayboldu: yapay zekâya bırak
+                    subscriber.putNext(nil)
+                    subscriber.putCompletion()
+                    return
+                }
+                let restored = restore(sanitizePunctuation(fixed), tokens: tokens)
+                subscriber.putNext(restored.0.isEmpty ? nil : (restored.0, restored.1))
+                subscriber.putCompletion()
+            }
+            return ActionDisposable { task?.cancel() }
+        }
+    }
+
+    public static func translateSignal(text: String, entities: [MessageTextEntity], toLang: String, context: String = "", forceAI: Bool = false) -> Signal<(String, [MessageTextEntity]), NoError> {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return .single((text, entities))
+        }
+        if !forceAI, let detected = detectLanguage(trimmed) {
+            let normTo = String(toLang.lowercased().prefix(2))
+            if detected.lowercased().hasPrefix(normTo) {
+                return .single((text, entities))
+            }
+        }
+        let original: (String, [MessageTextEntity]) = (text, entities)
+        if forceAI || !context.isEmpty {
+            return aiSignal(text: text, entities: entities, toLang: toLang, context: context)
+            |> map { $0 ?? original }
+        }
+        return googleSignal(text: text, entities: entities, toLang: toLang)
+        |> mapToSignal { result -> Signal<(String, [MessageTextEntity]), NoError> in
+            if let result {
+                return .single(result)
+            }
+            return aiSignal(text: text, entities: entities, toLang: toLang, context: "")
+            |> map { $0 ?? original }
         }
     }
 
@@ -393,5 +476,47 @@ public enum EsnaligramDeepInfra {
             }
         }
         return signal
+    }
+}
+
+/// Esnaligram: tek mesajı yapay zekâ ile (son en fazla 10 mesaj bağlamıyla) çevirir ve
+/// mesajın çevirisi olarak kaydeder. Başarısızsa nil.
+public func esnaligramAITranslateMessage(postbox: Postbox, messageId: MessageId, toLang: String) -> Signal<String?, NoError> {
+    return postbox.transaction { transaction -> (String, [MessageTextEntity], String)? in
+        guard let message = transaction.getMessage(messageId), !message.text.isEmpty else {
+            return nil
+        }
+        let entities = (message.attributes.first(where: { $0 is TextEntitiesMessageAttribute }) as? TextEntitiesMessageAttribute)?.entities ?? []
+        var lines: [String] = []
+        var scanned = 0
+        transaction.scanTopMessages(peerId: messageId.peerId, namespace: messageId.namespace, limit: 300, { m in
+            scanned += 1
+            if m.id.id < messageId.id && !m.text.isEmpty {
+                lines.append((m.flags.contains(.Incoming) ? "them: " : "me: ") + m.text)
+            }
+            return lines.count < 10 && scanned < 300
+        })
+        return (message.text, entities, EsnaligramDeepInfra.contextString(Array(lines.reversed())))
+    }
+    |> mapToSignal { data -> Signal<String?, NoError> in
+        guard let data else {
+            return .single(nil)
+        }
+        return EsnaligramDeepInfra.aiSignal(text: data.0, entities: data.1, toLang: toLang, context: data.2)
+        |> mapToSignal { result -> Signal<String?, NoError> in
+            guard let result else {
+                return .single(nil)
+            }
+            return postbox.transaction { transaction -> String? in
+                let updatedAttribute = TranslationMessageAttribute(text: result.0, entities: result.1, toLang: toLang)
+                transaction.updateMessage(messageId, update: { currentMessage in
+                    let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+                    var attributes = currentMessage.attributes.filter { !($0 is TranslationMessageAttribute) }
+                    attributes.append(updatedAttribute)
+                    return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                })
+                return result.0
+            }
+        }
     }
 }

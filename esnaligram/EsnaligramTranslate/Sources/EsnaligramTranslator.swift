@@ -31,7 +31,7 @@ public final class EsnaligramTranslator {
     public static func trimContext(_ lines: [String]) -> String {
         var out: [String] = []
         var total = 0
-        for l in lines.suffix(20).reversed() {
+        for l in lines.suffix(10).reversed() {
             let line = String(l.prefix(600)).replacingOccurrences(of: "\n", with: " ")
             if total + line.count > 3000 { break }
             total += line.count
@@ -117,8 +117,32 @@ public final class EsnaligramTranslator {
     public func translate(_ text: String, peerTexts: [String], contextLines: [String] = [], withContext: Bool = false, completion: @escaping (Result<String, TranslateError>) -> Void) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { completion(.failure(.empty)); return }
-        guard let ep = EsnaligramKeyStore.resolve(embeddedKey: EsnaligramSecrets.deepInfraKey, embeddedModel: EsnaligramSecrets.model) else { completion(.failure(.noKey)); return }
         let isTurkish = Self.detect(trimmed) == "tr"
+        // Esnaligram: varsayılan çeviri = ücretsiz Google; başarısızsa yapay zekâ
+        if !withContext {
+            var googleTarget: String? = "tr"
+            if isTurkish { googleTarget = resolveTarget(peerTexts: peerTexts) }
+            if let googleTarget {
+                EsnaligramGoogleTranslate.translate(trimmed, toLang: googleTarget) { [weak self] translated, _ in
+                    if let translated {
+                        let out = Self.sanitizePunctuation(translated)
+                        if !out.isEmpty {
+                            DispatchQueue.main.async { completion(.success(out)) }
+                            return
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self?.translateAI(trimmed, isTurkish: isTurkish, peerTexts: peerTexts, contextLines: contextLines, withContext: false, completion: completion)
+                    }
+                }
+                return
+            }
+        }
+        translateAI(trimmed, isTurkish: isTurkish, peerTexts: peerTexts, contextLines: contextLines, withContext: withContext, completion: completion)
+    }
+
+    private func translateAI(_ trimmed: String, isTurkish: Bool, peerTexts: [String], contextLines: [String], withContext: Bool, completion: @escaping (Result<String, TranslateError>) -> Void) {
+        guard let ep = EsnaligramKeyStore.resolve(embeddedKey: EsnaligramSecrets.deepInfraKey, embeddedModel: EsnaligramSecrets.model) else { completion(.failure(.noKey)); return }
         var context: String
         if isTurkish {
             guard let target = resolveTarget(peerTexts: peerTexts) else { completion(.failure(.targetUnknown)); return }

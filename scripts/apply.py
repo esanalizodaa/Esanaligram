@@ -447,3 +447,44 @@ edit("submodules/TelegramUI/Sources/AppDelegate.swift",
             }
         }
 """)
+
+# --- 9) Yapay zekâ ile bağlamlı çeviri: üç dokunuş + menü öğesi ---
+shutil.copy2(os.path.join(ROOT, "esnaligram/EsnaligramAITranslate.swift"),
+             os.path.join(TG, "submodules/TelegramUI/Sources/EsnaligramAITranslate.swift"))
+print("[ok] EsnaligramAITranslate → TelegramUI")
+edit("submodules/TelegramUI/Sources/ChatController.swift",
+"""        super.viewDidAppear(animated)
+        
+        self.didAppear = true
+""",
+"""        super.viewDidAppear(animated)
+        
+        self.didAppear = true
+        self.esnInstallTripleTap()
+""")
+edit("submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift",
+"""                if isSpeakSelectionEnabled() && !messageText.isEmpty {
+""",
+"""                if !messageText.isEmpty {
+                    let esnMessageId = message.id
+                    actions.append(.action(ContextMenuActionItem(text: "Yapay zeka ile çevir", icon: { theme in
+                        return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Translate"), color: theme.actionSheet.primaryTextColor)
+                    }, action: { _, f in
+                        f(.default)
+                        EsnaligramAIBridge.current?.esnAITranslate(messageId: esnMessageId)
+                    })))
+                }
+                
+                if isSpeakSelectionEnabled() && !messageText.isEmpty {
+""")
+
+# --- 10) Sohbet çevirisi: Premium şartı yok, her sohbette açık ---
+edit("submodules/TelegramUI/Sources/ChatControllerContentData.swift",
+"                        if (isPremium || maybeSuggestPremium || hasAutoTranslate) && !isHidden {",
+"                        if (isPremium || maybeSuggestPremium || hasAutoTranslate || true) && !isHidden { // Esnaligram")
+edit("submodules/TelegramUI/Sources/ChatControllerNode.swift",
+"                        isPremium: self.chatPresentationInterfaceState.isPremium,\n                        isActive: translationState.isEnabled,",
+"                        isPremium: true,\n                        isActive: translationState.isEnabled,")
+edit("submodules/SettingsUI/Sources/Language Selection/LocalizationListControllerNode.swift",
+"            let isPremium = peer?.isPremium ?? false\n",
+"            let isPremium = (peer?.isPremium ?? false) || true // Esnaligram\n")
