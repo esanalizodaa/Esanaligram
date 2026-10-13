@@ -38,6 +38,19 @@ jobs:
           key: bazel-${{ runner.os }}-${{ hashFiles('UPSTREAM') }}-${{ github.sha }}
           restore-keys: bazel-${{ runner.os }}-${{ hashFiles('UPSTREAM') }}-
 
+      - name: Fake imza sertifikasini keychain'e yukle
+        working-directory: telegram-ios
+        run: |
+          KC=$RUNNER_TEMP/fake.keychain-db
+          security create-keychain -p "" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "" "$KC"
+          for c in build-system/fake-codesigning/certs/*.p12; do security import "$c" -k "$KC" -P "" -A -T /usr/bin/codesign; done
+          for c in build-system/fake-codesigning/certs/*.cer; do [ -f "$c" ] && security import "$c" -k "$KC" -A || true; done
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KC"
+
       - name: Derle (fake codesigning = imzasız IPA)
         working-directory: telegram-ios
         run: |
