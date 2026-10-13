@@ -64,7 +64,11 @@ jobs:
         run: |
           IPA=$(find telegram-ios/bazel-bin/Telegram -name "*.ipa" | head -1)
           test -n "$IPA"
-          cp "$IPA" Esnaligram.ipa
+          rm -rf ipawork && mkdir ipawork && cd ipawork
+          unzip -q "../$IPA"
+          rm -rf Payload/*.app/PlugIns
+          zip -qry ../Esnaligram.ipa Payload
+          cd .. && unzip -l Esnaligram.ipa | grep -c PlugIns/ || true
 
       - uses: actions/upload-artifact@v4
         with:

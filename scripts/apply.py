@@ -424,3 +424,26 @@ edit("submodules/TelegramUI/Components/Stories/StoryContainerScreen/BUILD",
      '    deps = [\n        "//submodules/EsnaligramTranslate",\n        "//submodules/UrlWhitelist",\n')
 
 print("Tüm Esnaligram yamaları uygulandı.")
+
+# --- 8) Ücretsiz Apple ID ile açılış takılması: app group / passcode yedekleri ---
+edit("submodules/TelegramUI/Sources/AppDelegate.swift",
+"""        try! PasscodeEnvironment.shared.configure(PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService), privateAccessGroup: {
+            BuildConfig.keychainAccessGroup(baseAppBundleId: baseAppBundleId)
+        })
+        let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)
+""",
+"""        do {
+            try PasscodeEnvironment.shared.configure(PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService), privateAccessGroup: {
+                BuildConfig.keychainAccessGroup(baseAppBundleId: baseAppBundleId)
+            })
+        } catch let passcodeError {
+            print("Esnaligram: PasscodeEnvironment configure failed: \\(passcodeError)")
+        }
+        var maybeAppGroupUrl: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)
+        if maybeAppGroupUrl == nil {
+            maybeAppGroupUrl = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("EsnaligramGroup", isDirectory: true)
+            if let fallbackUrl = maybeAppGroupUrl {
+                let _ = try? FileManager.default.createDirectory(at: fallbackUrl, withIntermediateDirectories: true, attributes: nil)
+            }
+        }
+""")
