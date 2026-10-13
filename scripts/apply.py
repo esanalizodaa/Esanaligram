@@ -539,3 +539,17 @@ edit(SSC, "                    transition.setAlpha(view: inputPanelView, alpha: 
 # --- Tüm Google dilleri ---
 TRU = "submodules/TranslateUI/Sources/Translate.swift"
 edit(TRU, '    "yo",\n    "zu"\n]\n', '    "yo",\n    "zu",\n    "la",\n    "ak",\n    "as",\n    "ay",\n    "bm",\n    "bho",\n    "dv",\n    "doi",\n    "ee",\n    "gn",\n    "ilo",\n    "kri",\n    "ckb",\n    "lg",\n    "ln",\n    "mai",\n    "lus",\n    "om",\n    "qu",\n    "sa",\n    "nso",\n    "ti",\n    "ts",\n    "fil",\n    "yue",\n]\n')
+
+# --- Kendi giden mesajlarımı da çevir + hızlı çeviri kuyruğu ---
+edit(HL, """                            guard message.author?.id != self.context.account.peerId else {
+                                continue
+                            }
+""", "", count=1)
+edit(HL, """                                guard message.author?.id != self.context.account.peerId else {
+                                    continue
+                                }
+""", "", count=1)
+edit(HL, "    private let translationProcessingManager = ChatMessageThrottledProcessingManager(submitInterval: 1.0)\n",
+         "    private let translationProcessingManager = ChatMessageThrottledProcessingManager(submitInterval: 0.1)\n")
+edit("submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift",
+     "} else if !item.message.text.isEmpty && incoming {", "} else if !item.message.text.isEmpty {")
