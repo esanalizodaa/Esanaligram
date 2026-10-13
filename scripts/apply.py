@@ -553,3 +553,43 @@ edit(HL, "    private let translationProcessingManager = ChatMessageThrottledPro
          "    private let translationProcessingManager = ChatMessageThrottledProcessingManager(submitInterval: 0.1)\n")
 edit("submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift",
      "} else if !item.message.text.isEmpty && incoming {", "} else if !item.message.text.isEmpty {")
+
+# --- Passcode / Face ID: ücretsiz Apple ID'de paylaşılan keychain grubu yoksa varsayılan gruba düş ---
+PCF = "submodules/PasscodeCore/Sources/Passcode.swift"
+edit(PCF, """        #if !os(macOS)
+        query[kSecAttrAccessGroup as String] = try account.hasPrefix("biometric.") ? self.environment.privateAccessGroup() : self.environment.sharedAccessGroup()
+        #endif
+        return query
+    }
+""", """        #if !os(macOS)
+        if let group = try? (account.hasPrefix("biometric.") ? self.environment.privateAccessGroup() : self.environment.sharedAccessGroup()), PasscodeKeychain.esnGroupUsable(group) {
+            query[kSecAttrAccessGroup as String] = group
+        }
+        #endif
+        return query
+    }
+
+    // Esnaligram: erişim grubu kullanılabilir mi (yan yüklemede entitlement yok olabilir)
+    private static let esnGroupLock = NSLock()
+    private static var esnGroupCache: [String: Bool] = [:]
+    static func esnGroupUsable(_ group: String) -> Bool {
+        esnGroupLock.lock()
+        defer { esnGroupLock.unlock() }
+        if let cached = esnGroupCache[group] { return cached }
+        let probe: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "esnaligram.passcode.probe",
+            kSecAttrAccount as String: "probe",
+            kSecAttrAccessGroup as String: group,
+            kSecAttrSynchronizable as String: false
+        ]
+        var add = probe
+        add[kSecValueData as String] = Data([1])
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(add as CFDictionary, nil)
+        let ok = status == errSecSuccess || status == errSecDuplicateItem
+        if status == errSecSuccess { SecItemDelete(probe as CFDictionary) }
+        esnGroupCache[group] = ok
+        return ok
+    }
+""")
