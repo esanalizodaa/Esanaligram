@@ -235,11 +235,22 @@ public final class EsnaligramTranslateButton: UIButton {
                 self.setLoading(false)
                 switch result {
                 case let .success(out):
+                    let latest = self.getText?() ?? current
+                    let origLen = current.trimmingCharacters(in: .whitespacesAndNewlines).count
+                    let outLen = out.trimmingCharacters(in: .whitespacesAndNewlines).count
+                    if latest.trimmingCharacters(in: .whitespacesAndNewlines) != current.trimmingCharacters(in: .whitespacesAndNewlines) {
+                        // kullanıcı bu arada metni değiştirdi: üzerine yazma
+                        break
+                    }
+                    if outLen == 0 || (origLen >= 8 && outLen * 5 < origLen) {
+                        self.alert("Çeviri hatası", "Çeviri eksik geldi, orijinal metin korundu.")
+                        break
+                    }
                     self.undoText = current; self.lastTranslated = out; self.setText?(out)
                 case .failure(.targetUnknown):
                     self.showLanguagePicker(message: "Karşı tarafın dili algılanamadı. Dili seç, sonra tekrar Çevir'e bas.")
                 case .failure(.empty):
-                    break
+                    self.alert("Çeviri hatası", "Çeviri boş geldi, orijinal metin korundu.")
                 case .failure(.noKey):
                     self.showLanguagePicker(message: "DeepInfra API anahtarı yok. Aşağıya anahtarını gir ve Kaydet'e bas.")
                 case let .failure(.network(e)):

@@ -75,7 +75,11 @@ edit(IP, "    private var accessoryItemButtons: [(ChatTextInputAccessoryItem, Ac
     private lazy var esnTranslateButton: EsnaligramTranslateButton = {
         let b = EsnaligramTranslateButton(frame: .zero)
         b.getText = { [weak self] in
-            return self?.presentationInterfaceState?.interfaceState.effectiveInputState.inputText.string ?? ""
+            // Esnaligram: canlı metni doğrudan giriş düğümünden oku (arayüz durumu ilk harften sonra güncellenmeyebiliyor)
+            guard let self else { return "" }
+            let live = self.inputTextState.inputText.string
+            if !live.isEmpty { return live }
+            return self.presentationInterfaceState?.interfaceState.effectiveInputState.inputText.string ?? ""
         }
         b.setText = { [weak self] text in
             self?.interfaceInteraction?.updateTextInputStateAndMode { _, inputMode in
