@@ -34,7 +34,7 @@ if not key:
         m = re.search(r"DEEPINFRA_API_KEY=(\S+)", open(local).read())
         key = m.group(1) if m else ""
 if not key:
-    sys.exit("[HATA] DEEPINFRA_API_KEY yok")
+    print("[uyarı] DEEPINFRA_API_KEY yok; anahtar uygulama içinden girilecek")
 
 # --- 1) Modüller ---
 dst = os.path.join(TG, "submodules/EsnaligramTranslate")

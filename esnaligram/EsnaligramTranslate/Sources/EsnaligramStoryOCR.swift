@@ -115,6 +115,7 @@ public final class EsnaligramStoryTranslateButton: UIButton {
                     out = trimmed
                 case let .failure(.network(e)): out = "Çeviri hatası: \(e)"
                 case .failure(.empty): out = "Çeviri boş döndü."
+                case .failure(.noKey): out = "API anahtarı yok. Ayarlardan anahtarını gir."
                 }
                 if case .failure(.targetUnknown) = result {
                     // Direct API call forcing tr
