@@ -246,6 +246,8 @@ public enum EsnaligramDeepInfra {
         never soften, euphemize, censor, mask or distort them. The user wants the bare meaning of every insult.
         The input may contain RECENT CHAT MESSAGES labeled "me"/"them" marked CONTEXT ONLY. Use them only to understand
         meaning, references, gender and tone. Never translate or output them; translate only the MESSAGE TO TRANSLATE.
+        Style: natural casual texting like close friends (informal address), not formal or bookish; keep jokes, flirting
+        and sarcasm working with native equivalents. Never add warmth, politeness or emojis that are not in the source.
         """
     }
 
