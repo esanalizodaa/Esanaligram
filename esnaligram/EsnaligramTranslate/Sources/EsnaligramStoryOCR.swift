@@ -88,8 +88,8 @@ public final class EsnaligramStoryTranslateButton: UIButton {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func tapped() {
-        guard let image = getImage() else {
-            if let host = hostView() { EsnaligramStoryTranslateOverlay.show(in: host, text: "Görüntü henüz yüklenmedi.") }
+        guard let image = getImage?() else {
+            if let host = hostView?() { EsnaligramStoryTranslateOverlay.show(in: host, text: "Görüntü henüz yüklenmedi.") }
             return
         }
         isEnabled = false; alpha = 0.5
@@ -98,12 +98,12 @@ public final class EsnaligramStoryTranslateButton: UIButton {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 self.isEnabled = true; self.alpha = 1
-                if let host = self.hostView() { EsnaligramStoryTranslateOverlay.show(in: host, text: "Metin bulunamadı.") }
+                if let host = self.hostView?() { EsnaligramStoryTranslateOverlay.show(in: host, text: "Metin bulunamadı.") }
                 return
             }
             // Force Turkish / app language via manual target temporarily using translateOutgoing path
             let prev = EsnaligramTranslator.shared.manualTargetLanguage
-            EsnaligramTranslator.shared.manualTargetLanguage = Locale.current.language.languageCode?.identifier ?? "tr"
+            EsnaligramTranslator.shared.manualTargetLanguage = (Locale.current.languageCode ?? "tr")
             EsnaligramTranslator.shared.translate(trimmed, peerTexts: []) { result in
                 EsnaligramTranslator.shared.manualTargetLanguage = prev
                 self.isEnabled = true; self.alpha = 1
@@ -121,13 +121,13 @@ public final class EsnaligramStoryTranslateButton: UIButton {
                     self.forceTranslateToAppLang(trimmed)
                     return
                 }
-                if let host = self.hostView() { EsnaligramStoryTranslateOverlay.show(in: host, text: out) }
+                if let host = self.hostView?() { EsnaligramStoryTranslateOverlay.show(in: host, text: out) }
             }
         }
     }
 
     private func forceTranslateToAppLang(_ text: String) {
-        let lang = Locale.current.language.languageCode?.identifier ?? "tr"
+        let lang = Locale.current.languageCode ?? "tr"
         var req = URLRequest(url: URL(string: "https://api.deepinfra.com/v1/openai/chat/completions")!)
         req.httpMethod = "POST"; req.timeoutInterval = 40
         req.setValue("Bearer \(EsnaligramSecrets.deepInfraKey)", forHTTPHeaderField: "Authorization")
@@ -143,7 +143,7 @@ public final class EsnaligramStoryTranslateButton: UIButton {
                 out = t.trimmingCharacters(in: .whitespacesAndNewlines)
             } else { out = "Çeviri başarısız." }
             DispatchQueue.main.async {
-                if let host = self?.hostView() { EsnaligramStoryTranslateOverlay.show(in: host, text: out.isEmpty ? "Çeviri boş." : out) }
+                if let host = self?.hostView?() { EsnaligramStoryTranslateOverlay.show(in: host, text: out.isEmpty ? "Çeviri boş." : out) }
             }
         }.resume()
     }
