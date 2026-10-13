@@ -8,8 +8,16 @@ public enum EsnaligramGoogleTranslate {
         if c.hasPrefix("zh") {
             return (c.contains("hant") || c.contains("tw") || c.contains("hk")) ? "zh-TW" : "zh-CN"
         }
+        if c.hasPrefix("mni") { return "mni-Mtei" }
         if let dash = c.firstIndex(of: "-") { c = String(c[..<dash]) }
-        if c == "he" { return "iw" }
+        switch c {
+        case "he": return "iw"
+        case "jv": return "jw"
+        case "nb", "nn": return "no"
+        case "fil": return "tl"
+        case "yue": return "zh-TW"
+        default: break
+        }
         return c.isEmpty ? "en" : c
     }
 

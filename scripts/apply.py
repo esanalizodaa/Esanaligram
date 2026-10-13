@@ -535,3 +535,7 @@ edit(SSC, "                    transition.setAlpha(view: inputPanelView, alpha: 
                 esnStrip.alpha = esnShowStrip ? inputPanelAlpha : 0.0
                 esnStrip.isUserInteractionEnabled = esnShowStrip
 """)
+
+# --- Tüm Google dilleri ---
+TRU = "submodules/TranslateUI/Sources/Translate.swift"
+edit(TRU, '    "yo",\n    "zu"\n]\n', '    "yo",\n    "zu",\n    "la",\n    "ak",\n    "as",\n    "ay",\n    "bm",\n    "bho",\n    "dv",\n    "doi",\n    "ee",\n    "gn",\n    "ilo",\n    "kri",\n    "ckb",\n    "lg",\n    "ln",\n    "mai",\n    "lus",\n    "om",\n    "qu",\n    "sa",\n    "nso",\n    "ti",\n    "ts",\n    "fil",\n    "yue",\n]\n')

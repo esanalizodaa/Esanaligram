@@ -20,12 +20,15 @@ public final class EsnaligramTranslator {
 
     public enum TranslateError: Error { case targetUnknown, network(String), empty, noKey }
 
-    public static let languages: [(code: String, name: String)] = [
-        ("ru", "Русский"), ("en", "English"), ("uz", "Oʻzbek"), ("kk", "Қазақ"), ("uk", "Українська"),
-        ("az", "Azərbaycan"), ("de", "Deutsch"), ("fr", "Français"), ("es", "Español"), ("it", "Italiano"),
-        ("ar", "العربية"), ("fa", "فارسی"), ("ky", "Кыргыз"), ("tg", "Тоҷикӣ"), ("pl", "Polski"),
-        ("pt", "Português"), ("zh", "中文"), ("ja", "日本語"), ("ko", "한국어"), ("tr", "Türkçe")
-    ]
+    public static let languages: [(code: String, name: String)] = {
+        let codes = ["tr", "ru", "en", "uz", "kk", "ky", "tg", "az", "uk", "de", "fr", "es", "it", "pt", "ar", "fa", "id", "ms", "zh-CN", "zh-TW", "ja", "ko", "hi", "ur", "bn", "tk", "af", "sq", "am", "hy", "eu", "be", "bs", "bg", "ca", "ceb", "co", "hr", "cs", "da", "nl", "eo", "et", "fi", "fy", "gl", "ka", "el", "gu", "ht", "ha", "haw", "he", "hmn", "hu", "is", "ig", "ga", "jv", "kn", "km", "rw", "ku", "lo", "la", "lv", "lt", "lb", "mk", "mg", "ml", "mt", "mi", "mr", "mn", "my", "ne", "no", "ny", "or", "ps", "pl", "pa", "ro", "sm", "gd", "sr", "st", "sn", "sd", "si", "sk", "sl", "so", "su", "sw", "sv", "tl", "ta", "tt", "te", "th", "ug", "vi", "cy", "xh", "yi", "yo", "zu", "ak", "as", "ay", "bm", "bho", "dv", "doi", "ee", "gn", "ilo", "kri", "ckb", "lg", "ln", "mai", "lus", "om", "qu", "sa", "nso", "ti", "ts"]
+        return codes.map { code in
+            let native = Locale(identifier: code).localizedString(forIdentifier: code) ?? code
+            let local = Locale.current.localizedString(forIdentifier: code)
+            let name = (local != nil && local != native) ? native.capitalized + " (" + local! + ")" : native.capitalized
+            return (code: code, name: name)
+        }
+    }()
 
     /// Son ~10 satır, toplam ~2000 karakter.
     public static func trimContext(_ lines: [String]) -> String {
