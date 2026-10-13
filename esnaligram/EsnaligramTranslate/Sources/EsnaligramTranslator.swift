@@ -31,9 +31,9 @@ public final class EsnaligramTranslator {
     public static func trimContext(_ lines: [String]) -> String {
         var out: [String] = []
         var total = 0
-        for l in lines.suffix(10).reversed() {
+        for l in lines.suffix(20).reversed() {
             let line = String(l.prefix(600)).replacingOccurrences(of: "\n", with: " ")
-            if total + line.count > 2000 { break }
+            if total + line.count > 3000 { break }
             total += line.count
             out.insert(line, at: 0)
         }
@@ -71,7 +71,7 @@ public final class EsnaligramTranslator {
     }
 
     /// contextLines: "me: ..." / "them: ..." formatında son mesajlar (eski → yeni).
-    public func translate(_ text: String, peerTexts: [String], contextLines: [String] = [], completion: @escaping (Result<String, TranslateError>) -> Void) {
+    public func translate(_ text: String, peerTexts: [String], contextLines: [String] = [], withContext: Bool = false, completion: @escaping (Result<String, TranslateError>) -> Void) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { completion(.failure(.empty)); return }
         guard let ep = EsnaligramKeyStore.resolve(embeddedKey: EsnaligramSecrets.deepInfraKey, embeddedModel: EsnaligramSecrets.model) else { completion(.failure(.noKey)); return }
@@ -83,12 +83,12 @@ public final class EsnaligramTranslator {
         } else {
             context = "CONTEXT: Translate this message into natural Turkish."
         }
-        let ctx = Self.trimContext(contextLines)
+        let ctx = withContext ? Self.trimContext(contextLines) : ""
         var userContent = trimmed
         if !ctx.isEmpty {
             userContent = "RECENT CHAT MESSAGES (CONTEXT ONLY - DO NOT TRANSLATE, DO NOT OUTPUT):\n" + ctx + "\n\nMESSAGE TO TRANSLATE (output only its translation):\n" + trimmed
         }
-        var sys = EsnaligramPrompt.system
+        var sys = withContext ? EsnaligramPrompt.system : EsnaligramPrompt.compact
         let extra = extraPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if !extra.isEmpty { sys += "\n\nADDITIONAL USER INSTRUCTIONS:\n" + extra }
         sys += "\n\n" + context
@@ -125,8 +125,13 @@ public final class EsnaligramTranslateButton: UIButton {
         super.init(frame: frame)
         let cfg = UIImage.SymbolConfiguration(pointSize: 19, weight: .regular)
         setImage(UIImage(systemName: "character.bubble", withConfiguration: cfg), for: .normal)
-        accessibilityLabel = "Çevir"
-        addTarget(self, action: #selector(tapped), for: .touchUpInside)
+        accessibilityLabel = "Çevir (çift dokun: bağlamla tekrar çevir)"
+        let dbl = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
+        dbl.numberOfTapsRequired = 2
+        let single = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        single.require(toFail: dbl)
+        addGestureRecognizer(dbl)
+        addGestureRecognizer(single)
         addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:))))
         spinner.hidesWhenStopped = true
         addSubview(spinner)
@@ -137,16 +142,27 @@ public final class EsnaligramTranslateButton: UIButton {
 
     public func updateColor(_ color: UIColor) { tintColor = color; spinner.color = color }
 
+    /// Çift dokunuş: tam prompt + son sohbet mesajlarıyla (bağlamla) tekrar çevir.
+    @objc private func doubleTapped() {
+        var current = getText?() ?? ""
+        if let undo = undoText, current == lastTranslated { current = undo; undoText = nil; lastTranslated = nil }
+        run(current, withContext: true)
+    }
+
     @objc private func tapped() {
         let current = getText?() ?? ""
         if let undo = undoText, current == lastTranslated {
             setText?(undo); undoText = nil; lastTranslated = nil; return
         }
+        run(current, withContext: false)
+    }
+
+    private func run(_ current: String, withContext: Bool) {
         guard !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !spinner.isAnimating else { return }
         setLoading(true)
         let run: ([String]) -> Void = { [weak self] lines in
             let peerTexts = lines.filter { $0.hasPrefix("them: ") }.map { String($0.dropFirst(6)) }
-            EsnaligramTranslator.shared.translate(current, peerTexts: peerTexts, contextLines: lines) { result in
+            EsnaligramTranslator.shared.translate(current, peerTexts: peerTexts, contextLines: lines, withContext: withContext) { result in
                 guard let self else { return }
                 self.setLoading(false)
                 switch result {
@@ -236,7 +252,7 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
     public func numberOfSections(in t: UITableView) -> Int { 4 }
     public func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int {
         if s == 0 { return 4 } // key, model, base URL, buttons
-        if s == 1 { return 1 } // auto-translate toggle
+        if s == 1 { return 2 } // auto-translate toggle + context toggle
         if s == 2 { return 1 } // prompt
         return EsnaligramTranslator.languages.count + 1
     }
@@ -255,7 +271,7 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
             if let message { f = message + "\n" + f }
             return f
         }
-        if s == 1 { return "Açıkken gelen mesajlar uygulama diline çevrilir. Orijinal için çeviriye dokun." }
+        if s == 1 { return "Açıkken gelen mesajlar uygulama diline çevrilir. Orijinal için çeviriye dokun. Bağlamla çeviri tam prompt ve son sohbet mesajlarını gönderir, daha doğru ama daha pahalı. Giden mesajda çeviri tuşuna çift dokunarak bağlamla çevirebilirsin." }
         return nil
     }
     public func tableView(_ t: UITableView, heightForRowAt ip: IndexPath) -> CGFloat { ip.section == 2 ? 120 : 44 }
@@ -293,6 +309,14 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
             }
             return c
         }
+        if ip.section == 1 && ip.row == 1 {
+            c.textLabel?.text = "Gelen: bağlamla çevir"
+            let sw = UISwitch()
+            sw.isOn = UserDefaults.standard.bool(forKey: "esn.incomingContext")
+            sw.addTarget(self, action: #selector(ctxChanged(_:)), for: .valueChanged)
+            c.accessoryView = sw; c.selectionStyle = .none
+            return c
+        }
         if ip.section == 1 {
             c.textLabel?.text = "Otomatik çevir (gelen)"
             let sw = UISwitch()
@@ -312,6 +336,9 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         c.textLabel?.text = ip.row == 0 ? "Otomatik algıla" : EsnaligramTranslator.languages[ip.row - 1].name
         c.accessoryType = EsnaligramTranslator.shared.manualTargetLanguage == code ? .checkmark : .none
         return c
+    }
+    @objc private func ctxChanged(_ sw: UISwitch) {
+        UserDefaults.standard.set(sw.isOn, forKey: "esn.incomingContext")
     }
     @objc private func autoChanged(_ sw: UISwitch) {
         UserDefaults.standard.set(sw.isOn, forKey: "esn.autoTranslate")

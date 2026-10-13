@@ -167,6 +167,9 @@ public enum EsnaligramDeepInfra {
         set { UserDefaults.standard.set(newValue, forKey: "esn.autoTranslate") }
     }
 
+    /// Gelen mesajlar için bağlamlı (pahalı) çeviri; varsayılan KAPALI.
+    public static var incomingContextEnabled: Bool { UserDefaults.standard.bool(forKey: "esn.incomingContext") }
+
     public static func detectLanguage(_ text: String) -> String? {
         let r = NLLanguageRecognizer()
         r.processString(text)
@@ -255,9 +258,9 @@ public enum EsnaligramDeepInfra {
     public static func contextString(_ lines: [String]) -> String {
         var out: [String] = []
         var total = 0
-        for l in lines.suffix(10).reversed() {
+        for l in lines.suffix(20).reversed() {
             let line = String(l.prefix(600)).replacingOccurrences(of: "\n", with: " ")
-            if total + line.count > 2000 { break }
+            if total + line.count > 3000 { break }
             total += line.count
             out.insert(line, at: 0)
         }
@@ -272,7 +275,7 @@ public enum EsnaligramDeepInfra {
         if items.isEmpty { return .single([]) }
         var signal: Signal<[(String, [MessageTextEntity])], NoError> = .single([])
         for item in items {
-            let key = item.3 + ":" + toLang + ":" + String(item.0.hashValue)
+            let key = item.3 + ":" + toLang + (item.2.isEmpty ? ":c0:" : ":c1:") + String(item.0.hashValue)
             signal = signal |> mapToSignal { soFar in
                 cacheLock.lock()
                 let hit = cache[key]
