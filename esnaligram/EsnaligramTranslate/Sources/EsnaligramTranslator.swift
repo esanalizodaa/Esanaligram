@@ -160,7 +160,7 @@ public final class EsnaligramTranslateButton: UIButton {
     private func run(_ current: String, withContext: Bool) {
         guard !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !spinner.isAnimating else { return }
         setLoading(true)
-        let run: ([String]) -> Void = { [weak self] lines in
+        let go: ([String]) -> Void = { [weak self] lines in
             let peerTexts = lines.filter { $0.hasPrefix("them: ") }.map { String($0.dropFirst(6)) }
             EsnaligramTranslator.shared.translate(current, peerTexts: peerTexts, contextLines: lines, withContext: withContext) { result in
                 guard let self else { return }
@@ -179,7 +179,7 @@ public final class EsnaligramTranslateButton: UIButton {
                 }
             }
         }
-        if let getPeerTexts { getPeerTexts { texts in DispatchQueue.main.async { run(texts) } } } else { run([]) }
+        if let getPeerTexts { getPeerTexts { texts in DispatchQueue.main.async { go(texts) } } } else { go([]) }
     }
 
     @objc private func longPressed(_ g: UILongPressGestureRecognizer) {
