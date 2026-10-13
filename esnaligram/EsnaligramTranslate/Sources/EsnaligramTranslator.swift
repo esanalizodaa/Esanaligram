@@ -54,6 +54,49 @@ public final class EsnaligramTranslator {
         }.resume()
     }
 
+
+    /// Noktalama temizleme: korunan parçalar (URL, @mention, #etiket, e-posta, rakamlı kodlar, ⟦E0⟧, emoji) hariç.
+    /// Küçük harf, tek boşluk; soru ise sonda tek "?".
+    public static func sanitizePunctuation(_ text: String) -> String {
+        let trimmedAll = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isQuestion = trimmedAll.hasSuffix("?") || trimmedAll.hasSuffix("？") || trimmedAll.hasSuffix("؟")
+        func isProtected(_ w: String) -> Bool {
+            if w.contains("⟦") || w.contains("://") || w.hasPrefix("www.") || w.hasPrefix("@") || w.hasPrefix("#") || w.hasPrefix("/") { return true }
+            if w.contains("@") && w.contains(".") { return true }
+            if w.rangeOfCharacter(from: .decimalDigits) != nil && w.rangeOfCharacter(from: .letters) != nil { return true }
+            return false
+        }
+        func keepScalar(_ u: Unicode.Scalar) -> Bool {
+            if u.properties.isEmojiPresentation || (u.properties.isEmoji && u.value >= 0x2100) { return true }
+            if u.value == 0x200D || (0xFE00...0xFE0F).contains(u.value) || (0x1F3FB...0x1F3FF).contains(u.value) { return true }
+            if CharacterSet.punctuationCharacters.contains(u) || CharacterSet.symbols.contains(u) { return false }
+            return true
+        }
+        var lines: [String] = []
+        for line in trimmedAll.components(separatedBy: .newlines) {
+            var words: [String] = []
+            for raw in line.split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+                var w = String(raw)
+                if isProtected(w) {
+                    // yalnız sondaki cümle noktalamasını at
+                    while let last = w.unicodeScalars.last, ".,;:!?…»)\"'".unicodeScalars.contains(last), !w.hasSuffix("⟧") { w.unicodeScalars.removeLast() }
+                } else if w.rangeOfCharacter(from: .decimalDigits) != nil {
+                    // sayı: 1.5 / 10:30 / 1,000 içindeki ayraçları koru, uçları temizle
+                    w = w.trimmingCharacters(in: CharacterSet.punctuationCharacters.subtracting(CharacterSet(charactersIn: "%")))
+                } else {
+                    var out = String.UnicodeScalarView()
+                    for u in w.unicodeScalars where keepScalar(u) { out.append(u) }
+                    w = String(out).lowercased()
+                }
+                if !w.isEmpty { words.append(w) }
+            }
+            if !words.isEmpty { lines.append(words.joined(separator: " ")) }
+        }
+        var result = lines.joined(separator: "\n")
+        if isQuestion && !result.isEmpty && !result.hasSuffix("?") { result += "?" }
+        return result
+    }
+
     public static func detect(_ text: String) -> String? {
         let r = NLLanguageRecognizer()
         r.processString(text)
@@ -98,7 +141,8 @@ public final class EsnaligramTranslator {
             let result: Result<String, TranslateError>
             if let error = error {
                 result = .failure(.network(error.localizedDescription))
-            } else if let out = EsnaligramKeyStore.parse(data) {
+            } else if let raw = EsnaligramKeyStore.parse(data) {
+                let out = Self.sanitizePunctuation(raw)
                 result = out.isEmpty ? .failure(.empty) : .success(out)
             } else {
                 result = .failure(.network(String(data: data ?? Data(), encoding: .utf8) ?? "geçersiz yanıt"))

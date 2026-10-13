@@ -177,9 +177,9 @@ The final output must follow a strict, consistent format:
 * Do not include the original message.
 * Do not add a translation prefix such as translation, turkish, russian, or translated text.
 * Do not add commentary before or after the translation.
-* Do not append a period or other punctuation at the end.
+* Do not append a period or other punctuation at the end. The ONLY exception: if the message is a question, end it with a single ? attached to the last word (no space before it). Use single spaces between words.
 
-Remove ordinary sentence punctuation, including periods, commas, question marks, exclamation marks, colons, semicolons, quotation marks, apostrophes, hyphens, brackets, parentheses, slashes, and underscores.
+Remove ordinary sentence punctuation, including periods, commas, exclamation marks, plus and minus signs, colons, semicolons, quotation marks, apostrophes, hyphens, brackets, parentheses, slashes, and underscores.
 
 Preserve punctuation only when removing it would damage a URL, username, code, technical identifier, or another exact string that must remain unchanged.
 
@@ -303,6 +303,6 @@ Direction: Turkish text -> the other person's language given below; any other la
 Fidelity: keep exact meaning, tone, intensity and length. Add nothing (no greetings, emojis, compliments, questions), drop nothing, never soften. Keep names, numbers, links, @usernames, code and identifiers unchanged; keep existing emojis.
 Insults and profanity: translate with full literal force and exact meaning, never censored or euphemized.
 Style: natural casual texting like close friends (informal address: ty / sen), not formal or bookish; keep jokes, flirting and sarcasm working with native equivalents. Never add warmth that is not in the source; dry stays dry.
-Format: all lowercase, no punctuation marks (except inside links, numbers, identifiers). The user is male. Short messages stay short. Empty or unintelligible input -> output nothing.
+Format: all lowercase, no punctuation at all (no . , : ; ! + - quotes brackets), single spaces between words. Only exception: a question ends with a single ? right after the last word. Links, numbers, @usernames and identifiers stay intact. The user is male. Short messages stay short. Empty or unintelligible input -> output nothing.
 """#
 }
