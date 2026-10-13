@@ -304,7 +304,7 @@ old_peer = (
 new_peer = (
 "            } else {\n"
 "                // Esnaligram: DeepInfra — entity korumalı; her sohbet türünde\n"
-"                msgs = account.postbox.transaction { transaction -> [MessageId: (String, [MessageTextEntity])] in\n"
+"                msgs = account.postbox.transaction { transaction -> [MessageId: (String, [MessageTextEntity], String)] in\n"
 "                    var texts: [MessageId: (String, [MessageTextEntity], String)] = [:]\n"
 "                    var recent: [Message] = []\n"
 "                    if EsnaligramDeepInfra.incomingContextEnabled, let firstId = plainMessageIds.first {\n"
@@ -330,7 +330,7 @@ new_peer = (
 "                |> mapToSignal { messageTexts -> Signal<Api.messages.TranslatedText?, TranslationError> in\n"
 "                    var items: [(String, [MessageTextEntity], String, String)] = []\n"
 "                    for messageId in plainMessageIds {\n"
-"                        let t = messageTexts[messageId] ?? (\"\", [], \"\")\n"
+"                        let t: (String, [MessageTextEntity], String) = messageTexts[messageId] ?? (\"\", [MessageTextEntity](), \"\")\n"
 "                        items.append((t.0, t.1, t.2, \"\\(messageId.peerId.toInt64()):\\(messageId.namespace):\\(messageId.id)\"))\n"
 "                    }\n"
 "                    return EsnaligramDeepInfra.translateMessagesSignal(items: items, toLang: toLang)\n"
