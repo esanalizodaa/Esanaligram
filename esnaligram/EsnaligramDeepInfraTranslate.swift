@@ -3,6 +3,38 @@ import SwiftSignalKit
 import Postbox
 import NaturalLanguage
 
+import Security
+
+/// Kullanıcının kendi DeepInfra anahtarı (iOS Keychain). Yoksa derlemeye gömülü anahtar.
+public enum EsnaligramCoreKeyStore {
+    static let service = "esnaligram.deepinfra"
+    static let account = "apiKey"
+    public static var userKey: String? {
+        get {
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+            var out: AnyObject?
+            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data,
+                  let s = String(data: d, encoding: .utf8), !s.isEmpty else { return nil }
+            return s
+        }
+        set {
+            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+            SecItemDelete(base as CFDictionary)
+            guard let v = newValue?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return }
+            var add = base
+            add[kSecValueData as String] = Data(v.utf8)
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
+    public static func effectiveKey(embedded: String) -> String? {
+        if let k = userKey { return k }
+        let e = embedded.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (e.isEmpty || e.hasPrefix("__")) ? nil : e
+    }
+}
+
 /// Esnaligram: DeepInfra çeviri motoru (Telegram API yerine).
 /// Bağlantılar/mention/hashtag korunur (placeholder → geri yazma).
 public enum EsnaligramDeepInfra {
@@ -94,10 +126,54 @@ public enum EsnaligramDeepInfra {
         You are a translator. Translate the user's message into language code '\(toLang)'.
         Output ONLY the translation. Keep every placeholder like ⟦E0⟧ ⟦E1⟧ exactly as-is (same characters, same order).
         Do not translate or alter placeholders. Preserve meaning, tone, slang and emoji. No explanations.
+        Insults, swear words, slurs and profanity must be translated with their full literal force and exact meaning:
+        never soften, euphemize, censor, mask or distort them. The user wants the bare meaning of every insult.
+        The input may contain RECENT CHAT MESSAGES labeled "me"/"them" marked CONTEXT ONLY. Use them only to understand
+        meaning, references, gender and tone. Never translate or output them; translate only the MESSAGE TO TRANSLATE.
         """
     }
 
-    public static func translateSignal(text: String, entities: [MessageTextEntity], toLang: String) -> Signal<(String, [MessageTextEntity]), NoError> {
+    /// Son ~10 mesaj, toplam ~2000 karakter.
+    public static func contextString(_ lines: [String]) -> String {
+        var out: [String] = []
+        var total = 0
+        for l in lines.suffix(10).reversed() {
+            let line = String(l.prefix(600)).replacingOccurrences(of: "\n", with: " ")
+            if total + line.count > 2000 { break }
+            total += line.count
+            out.insert(line, at: 0)
+        }
+        return out.joined(separator: "\n")
+    }
+
+    private static let cacheLock = NSLock()
+    private static var cache: [String: (String, [MessageTextEntity])] = [:]
+
+    /// Mesaj kimliği başına önbellekli çeviri (bağlam değişse de tekrar ücret yok).
+    public static func translateMessagesSignal(items: [(String, [MessageTextEntity], String, String)], toLang: String) -> Signal<[(String, [MessageTextEntity])], NoError> {
+        if items.isEmpty { return .single([]) }
+        var signal: Signal<[(String, [MessageTextEntity])], NoError> = .single([])
+        for item in items {
+            let key = item.3 + ":" + toLang + ":" + String(item.0.hashValue)
+            signal = signal |> mapToSignal { soFar in
+                cacheLock.lock()
+                let hit = cache[key]
+                cacheLock.unlock()
+                if let hit { return .single(soFar + [hit]) }
+                return translateSignal(text: item.0, entities: item.1, toLang: toLang, context: item.2)
+                |> map { result in
+                    cacheLock.lock()
+                    if cache.count > 3000 { cache.removeAll() }
+                    cache[key] = result
+                    cacheLock.unlock()
+                    return soFar + [result]
+                }
+            }
+        }
+        return signal
+    }
+
+    public static func translateSignal(text: String, entities: [MessageTextEntity], toLang: String, context: String = "") -> Signal<(String, [MessageTextEntity]), NoError> {
         return Signal { subscriber in
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
@@ -114,11 +190,16 @@ public enum EsnaligramDeepInfra {
                     return EmptyDisposable
                 }
             }
+            guard let key = EsnaligramCoreKeyStore.effectiveKey(embedded: apiKey) else {
+                subscriber.putNext((text, entities))
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
             let (protected, tokens) = protect(text, entities: entities)
             var req = URLRequest(url: endpoint)
             req.httpMethod = "POST"
             req.timeoutInterval = 45
-            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             let body: [String: Any] = [
                 "model": model,
@@ -126,7 +207,7 @@ public enum EsnaligramDeepInfra {
                 "max_tokens": 2048,
                 "messages": [
                     ["role": "system", "content": systemPrompt(toLang: toLang)],
-                    ["role": "user", "content": protected]
+                    ["role": "user", "content": context.isEmpty ? protected : "RECENT CHAT MESSAGES (CONTEXT ONLY - DO NOT TRANSLATE, DO NOT OUTPUT):\n" + context + "\n\nMESSAGE TO TRANSLATE (output only its translation):\n" + protected]
                 ]
             ]
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)

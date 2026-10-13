@@ -89,7 +89,7 @@ edit(IP, "    private var accessoryItemButtons: [(ChatTextInputAccessoryItem, Ac
             let _ = (context.account.postbox.transaction { transaction -> [String] in
                 var result: [String] = []
                 transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: 40, { message in
-                    if message.flags.contains(.Incoming) && !message.text.isEmpty { result.append(message.text) }
+                    if !message.text.isEmpty { result.append((message.flags.contains(.Incoming) ? "them: " : "me: ") + message.text) }
                     return result.count < 15
                 })
                 return Array(result.reversed())
@@ -305,22 +305,35 @@ new_peer = (
 "            } else {\n"
 "                // Esnaligram: DeepInfra — entity korumalı; her sohbet türünde\n"
 "                msgs = account.postbox.transaction { transaction -> [MessageId: (String, [MessageTextEntity])] in\n"
-"                    var texts: [MessageId: (String, [MessageTextEntity])] = [:]\n"
+"                    var texts: [MessageId: (String, [MessageTextEntity], String)] = [:]\n"
+"                    var recent: [Message] = []\n"
+"                    if let firstId = plainMessageIds.first {\n"
+"                        transaction.scanTopMessages(peerId: firstId.peerId, namespace: firstId.namespace, limit: 120, { m in\n"
+"                            if !m.text.isEmpty { recent.append(m) }\n"
+"                            return recent.count < 120\n"
+"                        })\n"
+"                    }\n"
 "                    for messageId in plainMessageIds {\n"
 "                        if let message = transaction.getMessage(messageId) {\n"
 "                            let entities = (message.attributes.first(where: { $0 is TextEntitiesMessageAttribute }) as? TextEntitiesMessageAttribute)?.entities ?? []\n"
-"                            texts[message.id] = (message.text, entities)\n"
+"                            var lines: [String] = []\n"
+"                            for m in recent where m.id.namespace == messageId.namespace && m.id.id < messageId.id {\n"
+"                                lines.append((m.flags.contains(.Incoming) ? \"them: \" : \"me: \") + m.text)\n"
+"                                if lines.count >= 10 { break }\n"
+"                            }\n"
+"                            texts[message.id] = (message.text, entities, EsnaligramDeepInfra.contextString(Array(lines.reversed())))\n"
 "                        }\n"
 "                    }\n"
 "                    return texts\n"
 "                }\n"
 "                |> castError(TranslationError.self)\n"
 "                |> mapToSignal { messageTexts -> Signal<Api.messages.TranslatedText?, TranslationError> in\n"
-"                    var pairs: [(String, [MessageTextEntity])] = []\n"
+"                    var items: [(String, [MessageTextEntity], String, String)] = []\n"
 "                    for messageId in plainMessageIds {\n"
-"                        pairs.append(messageTexts[messageId] ?? (\"\", []))\n"
+"                        let t = messageTexts[messageId] ?? (\"\", [], \"\")\n"
+"                        items.append((t.0, t.1, t.2, \"\\(messageId.peerId.toInt64()):\\(messageId.namespace):\\(messageId.id)\"))\n"
 "                    }\n"
-"                    return EsnaligramDeepInfra.translateTextsSignal(texts: pairs, toLang: toLang)\n"
+"                    return EsnaligramDeepInfra.translateMessagesSignal(items: items, toLang: toLang)\n"
 "                    |> castError(TranslationError.self)\n"
 "                    |> map { results -> Api.messages.TranslatedText? in\n"
 "                        var apiResults: [Api.TextWithEntities] = []\n"
