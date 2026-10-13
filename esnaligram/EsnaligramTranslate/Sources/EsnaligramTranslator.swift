@@ -40,18 +40,15 @@ public final class EsnaligramTranslator {
     }
 
     /// Küçük test isteği.
-    public static func testKey(_ key: String, completion: @escaping (String) -> Void) {
-        var req = URLRequest(url: URL(string: "https://api.deepinfra.com/v1/openai/chat/completions")!)
-        req.httpMethod = "POST"; req.timeoutInterval = 20
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["model": EsnaligramSecrets.model, "max_tokens": 1,
-            "messages": [["role": "user", "content": "hi"]]] as [String: Any])
-        URLSession.shared.dataTask(with: req) { _, resp, err in
+    public static func testEndpoint(_ ep: EsnaligramKeyStore.Endpoint, completion: @escaping (String) -> Void) {
+        let req = EsnaligramKeyStore.makeRequest(ep, system: "", user: "hi", temperature: 0, maxTokens: 1, timeout: 20)
+        URLSession.shared.dataTask(with: req) { data, resp, err in
             let msg: String
             if let err { msg = "Hata: " + err.localizedDescription }
-            else if let code = (resp as? HTTPURLResponse)?.statusCode { msg = code == 200 ? "OK ✅" : "Hata: HTTP \(code)" }
-            else { msg = "Hata" }
+            else if let code = (resp as? HTTPURLResponse)?.statusCode {
+                if code == 200 { msg = "OK ✅ (\(ep.name), \(ep.model))" }
+                else { msg = "Hata: HTTP \(code) " + String((String(data: data ?? Data(), encoding: .utf8) ?? "").prefix(160)) }
+            } else { msg = "Hata" }
             DispatchQueue.main.async { completion(msg) }
         }.resume()
     }
@@ -76,7 +73,7 @@ public final class EsnaligramTranslator {
     public func translate(_ text: String, peerTexts: [String], contextLines: [String] = [], completion: @escaping (Result<String, TranslateError>) -> Void) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { completion(.failure(.empty)); return }
-        guard let apiKey = EsnaligramKeyStore.effectiveKey(embedded: EsnaligramSecrets.deepInfraKey) else { completion(.failure(.noKey)); return }
+        guard let ep = EsnaligramKeyStore.resolve(embeddedKey: EsnaligramSecrets.deepInfraKey, embeddedModel: EsnaligramSecrets.model) else { completion(.failure(.noKey)); return }
         let isTurkish = Self.detect(trimmed) == "tr"
         var context: String
         if isTurkish {
@@ -95,26 +92,12 @@ public final class EsnaligramTranslator {
         if !extra.isEmpty { sys += "\n\nADDITIONAL USER INSTRUCTIONS:\n" + extra }
         sys += "\n\n" + context
 
-        let body: [String: Any] = [
-            "model": EsnaligramSecrets.model,
-            "temperature": 0.3,
-            "max_tokens": 1024,
-            "messages": [["role": "system", "content": sys], ["role": "user", "content": userContent]]
-        ]
-        var req = URLRequest(url: URL(string: "https://api.deepinfra.com/v1/openai/chat/completions")!)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 40
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let req = EsnaligramKeyStore.makeRequest(ep, system: sys, user: userContent, temperature: 0.3, maxTokens: 1024, timeout: 40)
         URLSession.shared.dataTask(with: req) { data, _, error in
             let result: Result<String, TranslateError>
             if let error = error {
                 result = .failure(.network(error.localizedDescription))
-            } else if let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let msg = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any],
-                      let out = (msg["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            } else if let out = EsnaligramKeyStore.parse(data) {
                 result = out.isEmpty ? .failure(.empty) : .success(out)
             } else {
                 result = .failure(.network(String(data: data ?? Data(), encoding: .utf8) ?? "geçersiz yanıt"))
@@ -210,6 +193,8 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
     private let promptView = UITextView()
     private let message: String?
     private let keyField = UITextField()
+    private let modelField = UITextField()
+    private let urlField = UITextField()
     private var keyStatus: String?
 
     public init(message: String?) { self.message = message; super.init(nibName: nil, bundle: nil) }
@@ -231,6 +216,16 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         keyField.autocorrectionType = .no
         keyField.clearButtonMode = .whileEditing
         keyField.text = EsnaligramKeyStore.userKey
+        keyField.addTarget(self, action: #selector(fieldsChanged), for: .editingChanged)
+        modelField.placeholder = "Model (boş = otomatik)"
+        modelField.text = EsnaligramKeyStore.userModel
+        urlField.placeholder = "API adresi (gelişmiş, boş = otomatik)"
+        urlField.text = EsnaligramKeyStore.userBaseURL
+        urlField.keyboardType = .URL
+        for f in [modelField, urlField] {
+            f.autocapitalizationType = .none; f.autocorrectionType = .no; f.clearButtonMode = .whileEditing
+            f.addTarget(self, action: #selector(fieldsChanged), for: .editingChanged)
+        }
         view.addSubview(table)
     }
     @objc private func done() {
@@ -239,7 +234,7 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
     }
     public func numberOfSections(in t: UITableView) -> Int { 4 }
     public func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int {
-        if s == 0 { return 2 } // API key field + buttons
+        if s == 0 { return 4 } // key, model, base URL, buttons
         if s == 1 { return 1 } // auto-translate toggle
         if s == 2 { return 1 } // prompt
         return EsnaligramTranslator.languages.count + 1
@@ -252,9 +247,10 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
     }
     public func tableView(_ t: UITableView, titleForFooterInSection s: Int) -> String? {
         if s == 0 {
-            var f = EsnaligramKeyStore.userKey != nil ? "Kendi anahtarın kullanılıyor (Keychain)." :
+            var f: String = EsnaligramKeyStore.userKey != nil ? "Kendi anahtarın kullanılıyor (Keychain)." :
                 (EsnaligramKeyStore.effectiveKey(embedded: EsnaligramSecrets.deepInfraKey) != nil ? "Uygulamaya gömülü anahtar kullanılıyor." : "Anahtar yok.")
-            if let r = keyStatus { f += " " + r }
+            f += "\nSağlayıcı: " + detectedLabel()
+            if let r = keyStatus { f += "\n" + r }
             if let message { f = message + "\n" + f }
             return f
         }
@@ -266,6 +262,13 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         let c = UITableViewCell(style: .default, reuseIdentifier: nil)
         if ip.section == 0 {
             c.selectionStyle = .none
+            if ip.row == 1 || ip.row == 2 {
+                let f = ip.row == 1 ? modelField : urlField
+                f.frame = c.contentView.bounds.insetBy(dx: 16, dy: 4)
+                f.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                c.contentView.addSubview(f)
+                return c
+            }
             if ip.row == 0 {
                 keyField.frame = c.contentView.bounds.insetBy(dx: 16, dy: 4)
                 keyField.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -316,27 +319,51 @@ public final class EsnaligramTranslateSettingsController: UIViewController, UITa
         keyField.isSecureTextEntry.toggle()
         b.setImage(UIImage(systemName: keyField.isSecureTextEntry ? "eye" : "eye.slash"), for: .normal)
     }
+    private func detectedLabel() -> String {
+        let typed = (keyField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? (EsnaligramKeyStore.effectiveKey(embedded: EsnaligramSecrets.deepInfraKey) ?? "") : typed
+        let model = (modelField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let d = EsnaligramKeyStore.detect(key: key, model: model.isEmpty ? nil : model, baseURL: urlField.text)
+        return d.name + " — " + (model.isEmpty ? d.defaultModel : model)
+    }
+    private func typedEndpoint() -> EsnaligramKeyStore.Endpoint? {
+        let typed = (keyField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let key = typed.isEmpty ? EsnaligramKeyStore.effectiveKey(embedded: EsnaligramSecrets.deepInfraKey) : typed else { return nil }
+        let model = (modelField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let d = EsnaligramKeyStore.detect(key: key, model: model.isEmpty ? nil : model, baseURL: urlField.text)
+        let usingEmbedded = typed.isEmpty && EsnaligramKeyStore.userKey == nil
+        let m = model.isEmpty ? (usingEmbedded ? EsnaligramSecrets.model : d.defaultModel) : model
+        return EsnaligramKeyStore.Endpoint(name: d.name, baseURL: d.baseURL, key: key, model: m, anthropic: d.anthropic)
+    }
+    @objc private func fieldsChanged() {
+        if let footer = table.footerView(forSection: 0) {
+            footer.textLabel?.text = self.tableView(table, titleForFooterInSection: 0)
+            footer.sizeToFit()
+        }
+    }
     @objc private func saveKey() {
         let v = (keyField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !v.isEmpty else { return }
-        EsnaligramKeyStore.userKey = v
+        EsnaligramKeyStore.userModel = modelField.text
+        EsnaligramKeyStore.userBaseURL = urlField.text
+        if !v.isEmpty { EsnaligramKeyStore.userKey = v }
         keyStatus = "Kaydedildi."
         keyField.resignFirstResponder()
         table.reloadSections(IndexSet(integer: 0), with: .none)
     }
     @objc private func clearKey() {
         EsnaligramKeyStore.userKey = nil
-        keyField.text = ""
+        EsnaligramKeyStore.userModel = nil
+        EsnaligramKeyStore.userBaseURL = nil
+        keyField.text = ""; modelField.text = ""; urlField.text = ""
         keyStatus = "Silindi."
         table.reloadSections(IndexSet(integer: 0), with: .none)
     }
     @objc private func testKey() {
-        let typed = (keyField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let k = typed.isEmpty ? EsnaligramKeyStore.effectiveKey(embedded: EsnaligramSecrets.deepInfraKey) : typed else {
+        guard let ep = typedEndpoint() else {
             keyStatus = "Anahtar yok."; table.reloadSections(IndexSet(integer: 0), with: .none); return
         }
         keyStatus = "Test ediliyor…"; table.reloadSections(IndexSet(integer: 0), with: .none)
-        EsnaligramTranslator.testKey(k) { [weak self] r in
+        EsnaligramTranslator.testEndpoint(ep) { [weak self] r in
             guard let self else { return }
             self.keyStatus = "Test: " + r
             self.table.reloadSections(IndexSet(integer: 0), with: .none)
