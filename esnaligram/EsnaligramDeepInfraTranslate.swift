@@ -313,28 +313,44 @@ public enum EsnaligramDeepInfra {
     private static let cacheLock = NSLock()
     private static var cache: [String: (String, [MessageTextEntity])] = [:]
 
-    /// Mesaj kimliği başına önbellekli çeviri (bağlam değişse de tekrar ücret yok).
-    public static func translateMessagesSignal(items: [(String, [MessageTextEntity], String, String)], toLang: String) -> Signal<[(String, [MessageTextEntity])], NoError> {
-        if items.isEmpty { return .single([]) }
-        var signal: Signal<[(String, [MessageTextEntity])], NoError> = .single([])
-        for item in items {
-            let key = item.3 + ":" + toLang + (item.2.isEmpty ? ":c0:" : ":c1:") + String(item.0.hashValue)
-            signal = signal |> mapToSignal { soFar in
-                cacheLock.lock()
-                let hit = cache[key]
-                cacheLock.unlock()
-                if let hit { return .single(soFar + [hit]) }
-                return translateSignal(text: item.0, entities: item.1, toLang: toLang, context: item.2)
-                |> map { result in
-                    cacheLock.lock()
-                    if cache.count > 3000 { cache.removeAll() }
-                    cache[key] = result
-                    cacheLock.unlock()
-                    return soFar + [result]
-                }
+    /// Sinyalleri 6'lı gruplar halinde paralel çalıştırır (sıra korunur).
+    static func runConcurrently(_ signals: [Signal<(String, [MessageTextEntity]), NoError>]) -> Signal<[(String, [MessageTextEntity])], NoError> {
+        if signals.isEmpty { return .single([]) }
+        var result: Signal<[(String, [MessageTextEntity])], NoError> = .single([])
+        var i = 0
+        while i < signals.count {
+            let chunk = Array(signals[i ..< min(i + 6, signals.count)])
+            i += 6
+            result = result |> mapToSignal { soFar -> Signal<[(String, [MessageTextEntity])], NoError> in
+                return combineLatest(chunk) |> take(1) |> map { soFar + $0 }
             }
         }
-        return signal
+        return result
+    }
+
+    /// Mesaj kimliği başına önbellekli çeviri; istekler paralel.
+    public static func translateMessagesSignal(items: [(String, [MessageTextEntity], String, String)], toLang: String) -> Signal<[(String, [MessageTextEntity])], NoError> {
+        if items.isEmpty { return .single([]) }
+        var signals: [Signal<(String, [MessageTextEntity]), NoError>] = []
+        for item in items {
+            let key = item.3 + ":" + toLang + (item.2.isEmpty ? ":c0:" : ":c1:") + String(item.0.hashValue)
+            cacheLock.lock()
+            let hit = cache[key]
+            cacheLock.unlock()
+            if let hit {
+                signals.append(.single(hit))
+                continue
+            }
+            signals.append(translateSignal(text: item.0, entities: item.1, toLang: toLang, context: item.2)
+            |> map { result -> (String, [MessageTextEntity]) in
+                cacheLock.lock()
+                if cache.count > 3000 { cache.removeAll() }
+                cache[key] = result
+                cacheLock.unlock()
+                return result
+            })
+        }
+        return runConcurrently(signals)
     }
 
     /// Google'ın bozduğu yer tutucuları (⟦ E0 ⟧ gibi) düzeltir.
@@ -371,7 +387,7 @@ public enum EsnaligramDeepInfra {
         } else {
             completion(nil, nil); return nil
         }
-        req.timeoutInterval = 15
+        req.timeoutInterval = 4
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
         let task = URLSession.shared.dataTask(with: req) { data, resp, error in
             guard error == nil, let data, (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -400,7 +416,7 @@ public enum EsnaligramDeepInfra {
             }
             let (protected, tokens) = protect(text, entities: entities)
             let userContent: String = context.isEmpty ? protected : "RECENT CHAT MESSAGES (CONTEXT ONLY - DO NOT TRANSLATE, DO NOT OUTPUT):\n" + context + "\n\nMESSAGE TO TRANSLATE (output only its translation):\n" + protected
-            let req = EsnaligramCoreKeyStore.makeRequest(ep, system: systemPrompt(toLang: toLang), user: userContent, temperature: 0.2, maxTokens: 2048, timeout: 45)
+            let req = EsnaligramCoreKeyStore.makeRequest(ep, system: systemPrompt(toLang: toLang), user: userContent, temperature: 0.2, maxTokens: 2048, timeout: 20)
             let task = URLSession.shared.dataTask(with: req) { data, _, error in
                 if error == nil, let content = EsnaligramCoreKeyStore.parse(data), !content.isEmpty {
                     let restored = restore(sanitizePunctuation(normalizePlaceholders(content)), tokens: tokens)
@@ -427,9 +443,15 @@ public enum EsnaligramDeepInfra {
                 }
                 let fixed = normalizePlaceholders(translated)
                 if tokens.contains(where: { !fixed.contains($0.placeholder) }) {
-                    // Bağlantı kayboldu: yapay zekâya bırak
-                    subscriber.putNext(nil)
-                    subscriber.putCompletion()
+                    // Bağlantı kayboldu: düz metni ayrı çevir (hızlı), bağlantısız göster
+                    let _ = googleRequest(text, toLang: toLang) { plain, _ in
+                        if let plain, !plain.isEmpty {
+                            subscriber.putNext((sanitizePunctuation(plain), []))
+                        } else {
+                            subscriber.putNext(nil)
+                        }
+                        subscriber.putCompletion()
+                    }
                     return
                 }
                 let restored = restore(sanitizePunctuation(fixed), tokens: tokens)
@@ -467,15 +489,7 @@ public enum EsnaligramDeepInfra {
     }
 
     public static func translateTextsSignal(texts: [(String, [MessageTextEntity])], toLang: String) -> Signal<[(String, [MessageTextEntity])], NoError> {
-        if texts.isEmpty { return .single([]) }
-        var signal: Signal<[(String, [MessageTextEntity])], NoError> = .single([])
-        for item in texts {
-            signal = signal |> mapToSignal { soFar in
-                return translateSignal(text: item.0, entities: item.1, toLang: toLang)
-                |> map { soFar + [$0] }
-            }
-        }
-        return signal
+        return runConcurrently(texts.map { translateSignal(text: $0.0, entities: $0.1, toLang: toLang) })
     }
 }
 
